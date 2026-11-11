@@ -1,0 +1,197 @@
+# Build Qmo for Mac (Apple Silicon + Intel) and Windows on GitHub's runners and
+# publish the release HERE, so no one's own Mac is needed. Installed apps pick
+# it up on their own (src/main/updater.ts reads
+# releases/latest/download/latest.json from this repo).
+#
+# The source is the private m2cdev/qmo-desktop, read with a read-only deploy
+# key (secret SOURCE_DEPLOY_KEY). The workflow lives in this repo because a
+# workflow's own token can publish releases only to its own repo.
+#
+#   1. bump "version" in package.json on qmo-desktop main
+#   2. gh workflow run release.yml --repo m2cdev/qmo-desktop-releases -f notes="What changed"
+#   3. gh run watch <id> --repo m2cdev/qmo-desktop-releases --exit-status
+#
+# Secrets (set once with qmo-desktop's scripts/setup-release-secrets.sh):
+#   SOURCE_DEPLOY_KEY, QMO_SIGNING_P12_BASE64, QMO_SIGNING_P12_PASSWORD
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "One line: what changed"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  RELEASES_REPO: ${{ github.repository }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: m2cdev/qmo-desktop
+          ref: main
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          if gh release view "v$VERSION" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
+            echo "v$VERSION is already released: bump the version in package.json on main first"; exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION"
+
+  mac:
+    needs: check
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: m2cdev/qmo-desktop
+          ref: main
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Signing identity
+        env:
+          P12: ${{ secrets.QMO_SIGNING_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.QMO_SIGNING_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KC="$RUNNER_TEMP/signing.keychain-db"
+          KCPW=$(openssl rand -hex 16)
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/qmo.p12"
+          security create-keychain -p "$KCPW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPW" "$KC"
+          security import "$RUNNER_TEMP/qmo.p12" -k "$KC" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KCPW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/qmo.p12"
+          # Self-signed, so trust it for code signing, as on Youssef's Mac.
+          security find-certificate -c "Qmo Code Signing" -p "$KC" > "$RUNNER_TEMP/qmo.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$RUNNER_TEMP/qmo.pem"
+          SHA1=$(openssl x509 -noout -fingerprint -sha1 -in "$RUNNER_TEMP/qmo.pem" | cut -d= -f2 | tr -d ':')
+          security find-identity -p codesigning "$KC" | grep -q "$SHA1" || { echo "Qmo Code Signing identity missing"; exit 1; }
+          echo "QMO_SIGN_IDENTITY=$SHA1" >> "$GITHUB_ENV"
+      - name: Build, sign, DMGs and update zips
+        run: |
+          set -euo pipefail
+          npx electron-vite build
+          npx electron-builder --mac dir --arm64 --x64 --publish never
+          # hdiutil on GitHub runners can fail with "Resource busy" while the
+          # malware scanner holds the fresh app; retry.
+          for ARCH in arm64 x64; do
+            for attempt in 1 2 3 4 5; do
+              sh scripts/make-dmg.sh "$ARCH" && break
+              [ "$attempt" = 5 ] && exit 1
+              sleep $((attempt * 5))
+            done
+          done
+          VERSION=$(node -p "require('./package.json').version")
+          for ARCH in arm64 x64; do
+            APPDIR=dist/mac-$ARCH; [ "$ARCH" = "x64" ] && APPDIR=dist/mac
+            codesign -dv "$APPDIR/Qmo.app" 2>&1 | grep -E "Authority|Signature" || true
+            ditto -c -k --keepParent "$APPDIR/Qmo.app" "dist/Qmo-$VERSION-mac-$ARCH.zip"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: |
+            dist/Qmo-*-mac-*.zip
+            dist/Qmo-*-mac-*.dmg
+          if-no-files-found: error
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+
+  windows:
+    needs: check
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: m2cdev/qmo-desktop
+          ref: main
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx electron-vite build
+      - run: npx electron-builder --win nsis --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/Qmo-*-win-x64-setup.exe
+          if-no-files-found: error
+
+  publish:
+    needs: [check, mac, windows]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      NOTES: ${{ inputs.notes }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -la
+          # Fixed names for the website's download buttons (always the newest).
+          cp "Qmo-$VERSION-mac-arm64.dmg" Qmo-mac-arm64.dmg
+          cp "Qmo-$VERSION-mac-x64.dmg" Qmo-mac-intel.dmg
+          cp "Qmo-$VERSION-win-x64-setup.exe" Qmo-windows-setup.exe
+          BASE="https://github.com/$RELEASES_REPO/releases/download/v$VERSION"
+          python3 - "$VERSION" "$NOTES" "$BASE" <<'PY'
+          import json, sys
+          v, notes, base = sys.argv[1:4]
+          json.dump({
+              "version": v,
+              "notes": notes,
+              "mac": {"arm64": f"{base}/Qmo-{v}-mac-arm64.zip", "x64": f"{base}/Qmo-{v}-mac-x64.zip"},
+              "win": {"x64": f"{base}/Qmo-{v}-win-x64-setup.exe"},
+          }, open("latest.json", "w"), indent=2)
+          PY
+          gh release create "v$VERSION" --repo "$RELEASES_REPO" --title "Qmo $VERSION" --notes "$NOTES" \
+            latest.json \
+            "Qmo-$VERSION-mac-arm64.zip" "Qmo-$VERSION-mac-x64.zip" \
+            "Qmo-$VERSION-mac-arm64.dmg" "Qmo-$VERSION-mac-x64.dmg" \
+            "Qmo-$VERSION-win-x64-setup.exe" \
+            Qmo-mac-arm64.dmg Qmo-mac-intel.dmg Qmo-windows-setup.exe
+      - name: Check it is live
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            LIVE=$(curl -fsSL "https://github.com/$RELEASES_REPO/releases/latest/download/latest.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' || true)
+            [ "$LIVE" = "$VERSION" ] && break
+            sleep 6
+          done
+          [ "$LIVE" = "$VERSION" ] || { echo "latest.json still says $LIVE"; exit 1; }
+          echo "Live: Qmo $VERSION (installed apps update on their own)" | tee -a "$GITHUB_STEP_SUMMARY"
