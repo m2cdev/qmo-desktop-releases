@@ -1,0 +1,154 @@
+{
+  "meta": {
+    "lead": "21cbd42f-6563-4ac5-976a-78593f8b71b8",
+    "call": "desk-check-call-1",
+    "recordedAt": "2026-11-25T00:46:20.012Z"
+  },
+  "answers": [
+    {
+      "key": "GET /api/cobrand ",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "requestId": "b2885179-8f50-49d0-a622-c70a51c2545b",
+        "data": {
+          "coBrand": null
+        }
+      }
+    },
+    {
+      "key": "GET /api/extensions?point=pre_call ",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "requestId": "cc97072b-f34b-4f77-9489-33b7ee1e9277",
+        "data": {
+          "extensions": [
+            {
+              "id": "86bf3e97-0c3f-449e-9160-c94bd5036836",
+              "key": "e2e_panel",
+              "name": "E2E panel",
+              "points": [
+                "record_sidebar",
+                "pre_call",
+                "post_call"
+              ]
+            }
+          ],
+          "origin": "https://qmo-ext-host.vercel.app"
+        }
+      }
+    },
+    {
+      "key": "POST /api/extensions/86bf3e97-0c3f-449e-9160-c94bd5036836/bridge {\"point\":\"pre_call\",\"recordId\":\"21cbd42f-6563-4ac5-976a-78593f8b71b8\",\"call\":{\"method\":\"load\"}}",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "requestId": "e9e64e40-ff45-41cb-a514-91522af0d102",
+        "data": {
+          "code": "\"use strict\";Object.defineProperty(exports, \"__esModule\", {value: true}); function render(ctx, ui) {\n  const f = ctx.record ? ctx.record.fields : {};\n  return ui.Card({ title: \"E2E extension (automated test)\" },\n    ui.Text(\"City: \" + (f.city || \"unknown\")),\n    ui.Text(\"Lead: \" + (f.firstName || \"unknown\")),\n    ui.Button({ onClick: async (_e, qmo) => { await qmo.updateField(\"city\", \"Austin\"); } }, \"Set city to Austin\"),\n  );\n} exports.render = render;\n",
+          "context": {
+            "point": "pre_call",
+            "extension": {
+              "key": "e2e_panel",
+              "name": "E2E panel"
+            },
+            "record": {
+              "id": "21cbd42f-6563-4ac5-976a-78593f8b71b8",
+              "object": "contact",
+              "fields": {
+                "city": "Dallas",
+                "firstName": "Dana"
+              }
+            },
+            "user": null,
+            "theme": "light",
+            "preview": false
+          }
+        }
+      }
+    },
+    {
+      "key": "POST /api/extensions/86bf3e97-0c3f-449e-9160-c94bd5036836/bridge {\"point\":\"pre_call\",\"recordId\":\"21cbd42f-6563-4ac5-976a-78593f8b71b8\",\"call\":{\"method\":\"updateField\",\"args\":{\"field\":\"city\",\"value\":\"Austin\"}}}",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "requestId": "d7104874-ac97-4b2c-a065-838faf26d76e",
+        "data": {
+          "ok": true,
+          "field": "city",
+          "context": {
+            "point": "pre_call",
+            "extension": {
+              "key": "e2e_panel",
+              "name": "E2E panel"
+            },
+            "record": {
+              "id": "21cbd42f-6563-4ac5-976a-78593f8b71b8",
+              "object": "contact",
+              "fields": {
+                "city": "Austin",
+                "firstName": "Dana"
+              }
+            },
+            "user": null,
+            "theme": "light",
+            "preview": false
+          }
+        }
+      }
+    },
+    {
+      "key": "GET /api/extensions?point=post_call ",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "requestId": "67965729-5a84-4a50-a0bb-c616715843e5",
+        "data": {
+          "extensions": [
+            {
+              "id": "86bf3e97-0c3f-449e-9160-c94bd5036836",
+              "key": "e2e_panel",
+              "name": "E2E panel",
+              "points": [
+                "record_sidebar",
+                "pre_call",
+                "post_call"
+              ]
+            }
+          ],
+          "origin": "https://qmo-ext-host.vercel.app"
+        }
+      }
+    },
+    {
+      "key": "POST /api/extensions/86bf3e97-0c3f-449e-9160-c94bd5036836/bridge {\"point\":\"post_call\",\"recordId\":\"21cbd42f-6563-4ac5-976a-78593f8b71b8\",\"call\":{\"method\":\"load\"}}",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "requestId": "7ea52414-7204-4965-8e9c-f9cf4f79d369",
+        "data": {
+          "code": "\"use strict\";Object.defineProperty(exports, \"__esModule\", {value: true}); function render(ctx, ui) {\n  const f = ctx.record ? ctx.record.fields : {};\n  return ui.Card({ title: \"E2E extension (automated test)\" },\n    ui.Text(\"City: \" + (f.city || \"unknown\")),\n    ui.Text(\"Lead: \" + (f.firstName || \"unknown\")),\n    ui.Button({ onClick: async (_e, qmo) => { await qmo.updateField(\"city\", \"Austin\"); } }, \"Set city to Austin\"),\n  );\n} exports.render = render;\n",
+          "context": {
+            "point": "post_call",
+            "extension": {
+              "key": "e2e_panel",
+              "name": "E2E panel"
+            },
+            "record": {
+              "id": "21cbd42f-6563-4ac5-976a-78593f8b71b8",
+              "object": "contact",
+              "fields": {
+                "city": "Austin",
+                "firstName": "Dana"
+              }
+            },
+            "user": null,
+            "theme": "light",
+            "preview": false
+          }
+        }
+      }
+    }
+  ]
+}

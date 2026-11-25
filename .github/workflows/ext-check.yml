@@ -1,0 +1,74 @@
+# Desktop extension check: builds Qmo Desktop from source on a real Mac and a real
+# Windows machine and mounts a Qmo-approved partner extension at the pre-call and
+# post-call points, in the live extension host (qmo-ext-host.vercel.app).
+#
+# The server's answers are replayed from a live production run recorded with
+# throwaway test rows (ext-check/fixture.json, no tokens or secrets in it; the
+# rows were deleted after recording). So this checks the real built app, the
+# real OS and the real extension host; it is not a live audio call.
+#
+#   gh workflow run ext-check.yml --repo m2cdev/qmo-desktop-releases
+#   gh run watch <id> --repo m2cdev/qmo-desktop-releases --exit-status
+
+name: ext-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "qmo-desktop ref to build"
+        required: false
+        default: main
+  push:
+    branches: [main]
+    paths: ["ext-check/**", ".github/workflows/ext-check.yml"]
+  pull_request:
+    paths: ["ext-check/**", ".github/workflows/ext-check.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: check
+      - uses: actions/checkout@v4
+        with:
+          repository: m2cdev/qmo-desktop
+          ref: ${{ inputs.ref || 'main' }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          path: app
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+        working-directory: app
+      - run: npx electron-vite build
+        working-directory: app
+      - name: Mount the extension in the built coach panel (replay)
+        shell: bash
+        working-directory: app
+        env:
+          MODE: replay
+          OUT: ${{ github.workspace }}/app/out
+          FIXTURE: ${{ github.workspace }}/check/ext-check/fixture.json
+          RESULT: ${{ github.workspace }}/result-${{ matrix.os }}.json
+          SHOTS: ${{ github.workspace }}/shots
+        run: npx electron "$GITHUB_WORKSPACE/check/ext-check/ext-harness.cjs"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ext-check-${{ matrix.os }}
+          path: |
+            result-${{ matrix.os }}.json
+            shots/
